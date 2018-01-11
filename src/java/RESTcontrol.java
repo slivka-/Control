@@ -1,16 +1,19 @@
+import java.util.HashMap;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.Produces;
-import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
-import javax.ws.rs.PUT;
 import javax.ws.rs.core.MediaType;
-
+import javax.ws.rs.CookieParam;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
+import javax.ws.rs.core.Cookie;
+import javax.ws.rs.core.NewCookie;
+import javax.ws.rs.core.Response;
 import pl.jrj.mdb.IMdbManager;
 
 /**
@@ -19,6 +22,8 @@ import pl.jrj.mdb.IMdbManager;
 @Path("/control")
 public class RESTcontrol
 {
+    private final CounterData counterData = CounterData.getInstance(); 
+    
     @Context
     private UriInfo context;
 
@@ -27,16 +32,72 @@ public class RESTcontrol
     }
 
     @GET
-    @Produces(MediaType.TEXT_HTML)
-    public String getHtml()
+    @Path("/start")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response startCount(@CookieParam("msRestCookieId") Cookie userId)
     {
-        return "<html><body><h1>Hello, World!!</body></h1></html>";
+        if(userId == null)
+        {
+            return registerNewUser(true);
+        }
+        else
+        {
+            counterData.setUserCounting(userId.getValue());
+            return Response.ok().build();
+        }
+    }
+    
+    @GET
+    @Path("/stop")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response stopCount(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.setUserSuspended(userId.getValue());
+            return Response.ok().build();
+        }
+    }
+    
+    @GET
+    @Path("/res")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response getValues(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            return Response.ok().entity(counterData.getUserValues(userId.getValue())).build();
+        }
+    }
+    
+    @GET
+    @Path("/err")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response getErrors(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            return Response.ok().entity(counterData.getUserErrors(userId.getValue())).build();
+        }
     }
 
-    @PUT
-    @Consumes(MediaType.TEXT_HTML)
-    public void putHtml(String content)
+    
+    private Response registerNewUser(Boolean isCommandValid)
     {
+        String newId = counterData.addNewUser(isCommandValid);
+        return Response.ok().cookie(new NewCookie("msRestCookieId", newId)).build();
     }
 }
 
@@ -83,29 +144,21 @@ class CounterData
     private final String ALBUM = "108222";
     //MdbManager deployment descriptor
     private final String DB_MANAGER = "java:global/mdb-project/MdbManager!"+
-                                      "pl.jrj.mdb.IMdbManager";
-    
-    //current state of bean
-    private ServiceState state; 
-    //value counter
-    private int counter;
-    //error counter
-    private int error;
+                                      "pl.jrj.mdb.IMdbManager";    
     //session id
     private int sessionId = -1;
     
+    private HashMap<String,userState> usersStates;
+    
     private CounterData()
     {
-        this.counter = 0;
-        this.error = 0;
-        this.state = ServiceState.STANDBY;
+        usersStates = new HashMap<>();
         try
         {
             //create context
             javax.naming.Context ctx = new InitialContext();
             //lookup for MdbManager
             IMdbManager dbManager = (IMdbManager)ctx.lookup(DB_MANAGER);
-            
             //get new session id
             String s = dbManager.sessionId(ALBUM);
             //check if session id can be parsed to int
@@ -123,6 +176,109 @@ class CounterData
             //set sessionId to null, indicates broken instance
             this.sessionId = -1;
         }
+    }
+    
+    /**
+     * Adds new user to counting service
+     * @param isStart if user started with correct command
+     * @return id of new user
+     */
+    public synchronized String addNewUser(Boolean isStart)
+    {
+        //generate new random id
+        UUID newId = UUID.randomUUID();
+        //create new state for user
+        userState newState = new userState();
+        //set counter to 0
+        newState.counter = 0;
+        //if started correctly
+        if(isStart)
+        {
+            //0 errors, start counting
+            newState.error = 0;
+            newState.state = ServiceState.COUNTING;
+        }
+        else
+        {
+            //started with error
+            newState.error = 1;
+            newState.state = ServiceState.STANDBY;
+        }
+        //put new user to collection
+        usersStates.put(newId.toString(), newState);
+        return newId.toString();
+    }
+    
+    /**
+     * Set user to counting state
+     * @param userId user id
+     */
+    public synchronized void setUserCounting(String userId)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            //if is standby set to counting , else err
+            if(s.state == ServiceState.STANDBY)
+                s.state = ServiceState.COUNTING;
+            else
+                s.error++;         
+        }
+    }
+    
+    /**
+     * Set user to suspended state
+     * @param userId user id
+     */
+    public synchronized void setUserSuspended(String userId)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            //if is counting set to standby, else err
+            if(s.state == ServiceState.COUNTING)
+                s.state = ServiceState.STANDBY;
+            else
+                s.error++;         
+        }
+    }
+    
+    /**
+     * Get user counter val
+     * @param userId
+     * @return 
+     */
+    public synchronized String getUserValues(String userId)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            //check if counter value is more than 0
+            if(s.counter > 0)
+                //return modulo of sessionId by counter
+                return String.valueOf(sessionId % s.counter);
+        }
+        return "ERROR";
+    }
+    
+    public synchronized String getUserErrors(String userId)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            userState s = usersStates.get(userId);
+            //check if counter value is more than 0
+            if(s.error > 0)
+                //return modulo of sessionId by error
+                return String.valueOf(sessionId % s.error);
+        }
+        return "ERROR";
     }
     
     /**
@@ -145,13 +301,25 @@ class CounterData
             return false;
         }
     }
-}
-
-/**
- * Enum representing states of the web service
- * @author Michał Śliwa
- */
-enum ServiceState
-{
-    STANDBY, COUNTING;
+        
+    /**
+     * Enum representing states of single webservice user
+     */
+    private class userState
+    {
+        //current state of users counter
+        public ServiceState state; 
+        //value counter
+        public int counter;
+        //error counter
+        public int error;
+    }
+            
+   /**
+    * Enum representing states of the web service
+    */
+   private enum ServiceState
+   {
+       STANDBY, COUNTING;
+   }
 }
