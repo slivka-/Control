@@ -1,9 +1,5 @@
 import java.util.HashMap;
 import java.util.UUID;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.Produces;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -18,20 +14,20 @@ import javax.ws.rs.core.Response;
 import pl.jrj.mdb.IMdbManager;
 
 /**
+ * Rest webservice for multiuser counting
  * @author Michał Śliwa
  */
 @Path("/control")
 public class RESTcontrol
 {
+    //storage object that persists data between calls
     private final CounterData counterData = CounterData.getInstance(); 
     
-    @Context
-    private UriInfo context;
-
-    public RESTcontrol()
-    {
-    }
-
+    /**
+     * Set user state to counting
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/start")
     @Produces(MediaType.TEXT_PLAIN)
@@ -48,6 +44,11 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Set user state to standby
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/stop")
     @Produces(MediaType.TEXT_PLAIN)
@@ -64,6 +65,11 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Clear user counters
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/clr")
     @Produces(MediaType.TEXT_PLAIN)
@@ -80,6 +86,11 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Increase user counter by 1
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/icr")
     @Produces(MediaType.TEXT_PLAIN)
@@ -96,6 +107,12 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Increase user counter by specified amount
+     * @param userId
+     * @param num
+     * @return 
+     */
     @GET
     @Path("/icr/{num}")
     @Produces(MediaType.TEXT_PLAIN)
@@ -112,7 +129,54 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Decrease user counter by 1
+     * @param userId
+     * @return 
+     */
+    @GET
+    @Path("/dcr")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response decCounter(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.incrCounter(userId.getValue(),null);
+            return Response.ok().build();
+        }
+    }
     
+    /**
+     * Decrease user counter by specified amount
+     * @param userId
+     * @param num
+     * @return 
+     */
+    @GET
+    @Path("/dcr/{num}")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response decCounterByNum(@CookieParam("msRestCookieId") Cookie userId, @PathParam("num") String num)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.decrCounter(userId.getValue(),num);
+            return Response.ok().build();
+        }
+    }
+    
+    /**
+     * Display result of sessionId mod counter
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/res")
     @Produces(MediaType.TEXT_PLAIN)
@@ -128,6 +192,11 @@ public class RESTcontrol
         }
     }
     
+    /**
+     * Display result of sessionId mod err
+     * @param userId
+     * @return 
+     */
     @GET
     @Path("/err")
     @Produces(MediaType.TEXT_PLAIN)
@@ -143,7 +212,11 @@ public class RESTcontrol
         }
     }
 
-    
+    /**
+     * Registers new user in webservice
+     * @param isCommandValid
+     * @return 
+     */
     private Response registerNewUser(Boolean isCommandValid)
     {
         String newId = counterData.addNewUser(isCommandValid);
@@ -156,12 +229,7 @@ public class RESTcontrol
  * @author Michał Śliwa
  */
 class CounterData
-{
-    //------------------------------------------
-    private static final Logger LOGGER = 
-                            Logger.getLogger(CounterData.class.getName());
-    //------------------------------------------
-    
+{   
     //static instance
     private static CounterData instance = null;
     
@@ -220,13 +288,9 @@ class CounterData
                 this.sessionId = Integer.parseInt(s);
             else
                 this.sessionId = -1;
-            if(this.sessionId == -1)
-                LOGGER.log(Level.SEVERE, "!RECIEVED INVALID SESSION ID!");
         }
         catch (NamingException ex)
         {
-            //log any errors
-            LOGGER.log(Level.SEVERE, ex.toString());
             //set sessionId to null, indicates broken instance
             this.sessionId = -1;
         }
@@ -327,16 +391,63 @@ class CounterData
         //if user exists
         if(usersStates.containsKey(userId))
         {
+            
             //get user info
             userState s = usersStates.get(userId);
-            if(val == null)
-                s.counter++;
+            if(s.state == ServiceState.COUNTING)
+            {
+                if(val == null)
+                    s.counter++;
+                else
+                {
+                    //check if value can be parsed
+                    int temp = parseMultType(val);
+                    if(temp!=-1)
+                        s.counter += temp;
+                    else
+                        s.error++;
+                }
+            }
             else
             {
-                if(canParseInt(val))
-                    s.counter += Integer.parseInt(val);
+                s.error++;
+            }
+        }
+    }
+    
+    /**
+     * Increases counter value
+     * @param userId
+     * @param val 
+     */
+    public synchronized void decrCounter(String userId, String val)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            //check if is counting
+            if(s.state == ServiceState.COUNTING)
+            {
+                //if no value passed, decrease by 1
+                if(val == null)
+                    s.counter--;
                 else
-                    s.error++;
+                {
+                    //check if value can be parsed
+                    int temp = parseMultType(val);
+                    if(temp!=-1)
+                        //decrease by value
+                        s.counter -= temp;
+                    else
+                        s.error++;
+                }
+            }
+            else
+            {
+                //increase error
+                s.error++;
             }
         }
     }
@@ -398,6 +509,35 @@ class CounterData
         {
             //on exception return false
             return false;
+        }
+    }
+    
+    /**
+     * Parses integer from string with different bases
+     * @param num
+     * @return 
+     */
+    private int parseMultType(String num)
+    {
+        try
+        {
+            //convert string to char array
+            char[] digits = num.toCharArray();
+            //if begins with 0b or 0B, convert to binary
+            if(digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B'))
+                return Integer.parseInt(num.substring(2),2);
+            //if begins with 0x or 0X, convert to hexadecimal
+            else if(digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
+                return Integer.parseInt(num.substring(2),16);
+            //if begins with 0, convert to octal
+            else if(digits[0] == '0')
+                return Integer.parseInt(num.substring(1),8);
+            else // else, convert to decimal
+                return Integer.parseInt(num,10);
+        }
+        catch(NumberFormatException ex)
+        {
+            return -1;
         }
     }
         
