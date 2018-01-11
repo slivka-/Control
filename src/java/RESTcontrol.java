@@ -11,6 +11,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.CookieParam;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
+import javax.ws.rs.PathParam;
 import javax.ws.rs.core.Cookie;
 import javax.ws.rs.core.NewCookie;
 import javax.ws.rs.core.Response;
@@ -64,6 +65,55 @@ public class RESTcontrol
     }
     
     @GET
+    @Path("/clr")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response clrCounters(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.clearCounter(userId.getValue());
+            return Response.ok().build();
+        }
+    }
+    
+    @GET
+    @Path("/icr")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response incCounter(@CookieParam("msRestCookieId") Cookie userId)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.incrCounter(userId.getValue(),null);
+            return Response.ok().build();
+        }
+    }
+    
+    @GET
+    @Path("/icr/{num}")
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response incCounterByNum(@CookieParam("msRestCookieId") Cookie userId, @PathParam("num") String num)
+    {
+        if(userId == null)
+        {
+            return registerNewUser(false);
+        }
+        else
+        {
+            counterData.incrCounter(userId.getValue(),num);
+            return Response.ok().build();
+        }
+    }
+    
+    
+    @GET
     @Path("/res")
     @Produces(MediaType.TEXT_PLAIN)
     public Response getValues(@CookieParam("msRestCookieId") Cookie userId)
@@ -115,7 +165,7 @@ class CounterData
     //static instance
     private static CounterData instance = null;
     
-     /**
+    /**
      * Returns single instance of CounterData class
      * Ensures only one instance is present at any given time
      * Thread safe
@@ -148,8 +198,12 @@ class CounterData
     //session id
     private int sessionId = -1;
     
+    //collection of user information
     private HashMap<String,userState> usersStates;
     
+    /**
+     * private constructor
+     */
     private CounterData()
     {
         usersStates = new HashMap<>();
@@ -248,6 +302,46 @@ class CounterData
     }
     
     /**
+     * Clears users counter and error
+     * @param userId user id
+     */
+    public synchronized void clearCounter(String userId)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            s.counter = 0;
+            s.error = 0;
+        }
+    }
+    
+    /**
+     * Increases counter value
+     * @param userId
+     * @param val 
+     */
+    public synchronized void incrCounter(String userId, String val)
+    {
+        //if user exists
+        if(usersStates.containsKey(userId))
+        {
+            //get user info
+            userState s = usersStates.get(userId);
+            if(val == null)
+                s.counter++;
+            else
+            {
+                if(canParseInt(val))
+                    s.counter += Integer.parseInt(val);
+                else
+                    s.error++;
+            }
+        }
+    }
+    
+    /**
      * Get user counter val
      * @param userId
      * @return 
@@ -267,6 +361,11 @@ class CounterData
         return "ERROR";
     }
     
+    /**
+     * Get user error val
+     * @param userId
+     * @return 
+     */
     public synchronized String getUserErrors(String userId)
     {
         //if user exists
@@ -315,11 +414,11 @@ class CounterData
         public int error;
     }
             
-   /**
+    /**
     * Enum representing states of the web service
     */
-   private enum ServiceState
-   {
+    private enum ServiceState
+    {
        STANDBY, COUNTING;
-   }
+    }
 }
