@@ -77,7 +77,7 @@ public class RESTcontrol
     {
         if(userId == null)
         {
-            return registerNewUser(false);
+            return registerNewUser(null);
         }
         else
         {
@@ -184,7 +184,7 @@ public class RESTcontrol
     {
         if(userId == null)
         {
-            return registerNewUser(false);
+            return registerNewUser(null);
         }
         else
         {
@@ -204,7 +204,7 @@ public class RESTcontrol
     {
         if(userId == null)
         {
-            return registerNewUser(false);
+            return registerNewUser(null);
         }
         else
         {
@@ -309,17 +309,26 @@ class CounterData
         userState newState = new userState();
         //set counter to 0
         newState.counter = 0;
-        //if started correctly
-        if(isStart)
+        if(isStart!=null)
         {
-            //0 errors, start counting
-            newState.error = 0;
-            newState.state = ServiceState.COUNTING;
+            //if started correctly
+            if(isStart)
+            {
+                //0 errors, start counting
+                newState.error = 0;
+                newState.state = ServiceState.COUNTING;
+            }
+            else
+            {
+                //started with error
+                newState.error = 1;
+                newState.state = ServiceState.STANDBY;
+            }
         }
         else
         {
-            //started with error
-            newState.error = 1;
+            //0 errors, start standby
+            newState.error = 0;
             newState.state = ServiceState.STANDBY;
         }
         //put new user to collection
