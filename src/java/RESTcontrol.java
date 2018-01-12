@@ -478,7 +478,7 @@ class CounterData
                 //return modulo of sessionId by counter
                 return String.valueOf(sessionId % s.counter);
         }
-        return "ERROR";
+        return "0";
     }
     
     /**
@@ -497,7 +497,7 @@ class CounterData
                 //return modulo of sessionId by error
                 return String.valueOf(sessionId % s.error);
         }
-        return "ERROR";
+        return "0";
     }
     
     /**
